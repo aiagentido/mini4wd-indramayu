@@ -1552,11 +1552,13 @@ THREE.OrbitControls = OrbitControls;
       const LAN_LEN = LAN.s1 - LAN.s0;                       // 1,62 m
       /* Lan1 = JEMBATAN MELENGKUNG (arched bridge) 1 lajur — koreksi dari
          foto asli Ido 27 Nov 03:36 (part fisik 69579), menggantikan model
-         X datar R5. SATU lajur luar naik lewat arch, lajur luar satunya +
-         lajur tengah tetap di permukaan tanah dan lewat DI BAWAH arch.
-         KOREKSI V2 (27 Nov, foto set produk 69579): lajur bergeser
-         menyamping dulu di tanah — S-approach / S-exit DATAR di kedua
-         ujung keping (masing-masing ~27 cm) — arch HANYA di tengah. */
+         X datar R5. SATU lajur luar naik lewat arch, lajur lain tetap di
+         permukaan tanah dan lewat DI BAWAH arch.
+         KOREKSI V2 (27 Nov): lajur bergeser menyamping dulu di tanah —
+         S-approach / S-exit DATAR di kedua ujung keping (masing-masing
+         ~27 cm) — arch HANYA di tengah.
+         KOREKSI V3 (perintah Ido): jalur BUKAN tukar A<->C, melainkan
+         ROTASI SIKLIK A->B, B->C, C->A (C->A lewat atas jembatan). */
       const ARCH_H = 0.120;   // puncak arch 120 mm di atas permukaan lajur bawah [ESTIMASI dari foto: ~100-150 mm]
       const ARCH_DECK = 0.02; // tebal dek arch 20 mm -> clearance di bawah arch = 120 - 20 = 100 mm (>= 85 mm keputusan Ido; mobil <=70 mm muat, sisa 30 mm)
       const ARCH_T0 = 1 / 6, ARCH_T1 = 5 / 6; // rentang arch: tengah 2/3 keping (1,08 m); ujung 1/6 (~27 cm) datar
@@ -1581,22 +1583,35 @@ THREE.OrbitControls = OrbitControls;
         if (t < 0.97) return 0.035 * (1 - smooth01((t - 0.85) / 0.12));
         return 0;
       }
-      /* Jalur Lan1 tampak atas tetap X: lajur luar bertukar sisi, cos(pi t);
-         lajur "over" mengikuti profil arch, lajur "under" tetap di tanah. */
+      /* Jalur Lan1 V3 = ROTASI SIKLIK lajur (bukan tukar A<->C):
+         masuk A (+0,115) keluar B (0)            — DATAR;
+         masuk B (0)      keluar C (-0,115)       — DATAR;
+         masuk C (-0,115) keluar A (+0,115)       — LEWAT ATAS (bump=archH).
+         Tiap lewatan Lan1 menggeser indeks lajur -1 (mod 3), jadi 3 lap
+         kembali ke lajur awal (A->B->C->A). */
       function lanT(s){ return (s - LAN.s0) / LAN_LEN; }
 
-      /* Offset lajur mobil: setelah tiap lewatan Lan1, lajur luar
-         bertukar (1 <-> 3); di dalam Lan1 mengikuti diagonal lajurnya. */
+      /* Indeks lajur: 0 = B (tengah, offset 0), 1 = A (kiri, +0,115),
+         2 = C (kanan, -0,115). */
+      function laneIdx(lane){ return ((Math.round(lane / LANE_W) % 3) + 3) % 3; }
+      function laneOff(idx){ return idx === 1 ? LANE_W : (idx === 2 ? -LANE_W : 0); }
+
+      /* Jumlah lewatan Lan1 yang sudah selesai pada jarak dist. */
       function swapsDone(dist){ return dist < LAN.s1 ? 0 : Math.floor((dist - LAN.s1) / TRACK_LEN) + 1; }
       function carLaneInfo(dist, lane){
         const s = wrapS(dist);
-        const par = (swapsDone(dist) % 2 === 0) ? 1 : -1;
-        if (s >= LAN.s0 && s < LAN.s1){ // batas atas EKSKLUSIF: di s=s1 persis, par sudah -1 — pakai cabang luar supaya offset kontinu (-0,115), bukan lompat ke +0,115
+        const p = swapsDone(dist);
+        if (s >= LAN.s0 && s < LAN.s1){ // batas atas EKSKLUSIF: di s=s1 lewatan ini sudah dihitung — cabang luar memberi offset rotasi yang sama (kontinu)
           const t = lanT(s);
-          const aIn = lane * par;
-          return { off: aIn * Math.cos(Math.PI * t), bump: aIn > 0 ? archH(t) : 0 };
+          const eIdx = ((laneIdx(lane) - p) % 3 + 3) % 3;  // lajur masuk lewatan ini
+          const xIdx = ((eIdx - 1) % 3 + 3) % 3;           // lajur keluar (rotasi -1)
+          const f = (1 - Math.cos(Math.PI * t)) / 2;       // ease halus 0..1
+          const off = laneOff(eIdx) * (1 - f) + laneOff(xIdx) * f;
+          const bump = (eIdx === 2) ? archH(t) : 0;         // hanya C->A yang naik
+          return { off, bump };
         }
-        return { off: lane * par, bump: 0 };
+        const idx = ((laneIdx(lane) - p) % 3 + 3) % 3;
+        return { off: laneOff(idx), bump: 0 };
       }
       function carPose(dist, lane){
         const s = wrapS(dist);
@@ -1788,32 +1803,39 @@ THREE.OrbitControls = OrbitControls;
 
       /* ---------- Lan1: JEMBATAN MELENGKUNG (arched bridge, 1 lajur) ----------
          Koreksi dari foto asli Ido 27 Nov 03:36 (part fisik Tamiya 69579):
-         SATU lajur luar naik lewat arch (puncak 120 mm di tengah bentang
-         [ESTIMASI foto]), menyapu menyamping membentuk kurva-S, lalu
-         turun di sisi berlawanan; lajur luar satunya + lajur tengah tetap
-         di permukaan tanah dan lewat DI BAWAH arch (clearance 100 mm).
+         SATU lajur naik lewat arch (puncak 120 mm di tengah bentang
+          [ESTIMASI foto]), menyapu menyamping membentuk kurva-S, lalu
+         turun di sisi berlawanan; dua lajur lain tetap di permukaan tanah
+         dan lewat DI BAWAH arch (clearance 100 mm).
          KOREKSI V2: arch HANYA di tengah keping (t 1/6-5/6, bentang
-         1,08 m) — kedua ujung keping DATAR (S-approach/S-exit ~27 cm).
+          1,08 m) — kedua ujung keping DATAR (S-approach/S-exit ~27 cm).
+         KOREKSI V3: jalur = ROTASI SIKLIK A->B, B->C, C->A (C->A lewat
+         atas jembatan); pita jembatan di-mirror vs V2.
          Arch punya dinding sendiri di kedua sisinya yang mengikuti
          lengkung; dinding pemisah lajur bawah terputus di rentang arch
          (t 1/6-5/6); 2 tiang penyangga kotak gaya 69579 di t=0,35/0,65
          (tengah keping sengaja tanpa tiang supaya lajur tengah bebas).
-         Tampak atas tetap X (lajur luar bertukar sisi). TANPA cover,
-         TANPA penyempitan. */
+         TANPA cover, TANPA penyempitan. */
       function buildLan1Surface(grp){
         const n = 96, rhw = LANE_W / 2 + 0.004;
         const accTop = makeAccum(), accWall = makeAccum(), accSkirt = makeAccum();
-        // --- Tiga pita lajur: "over" mengikuti profil arch, 2 lainnya di tanah ---
-        // (pita "under" diangkat 0,8 mm supaya tidak z-fighting dengan lajur
-        // tengah di titik silang, tempat keduanya bertemu di offset 0)
-        for (const a of [LANE_W, 0, -LANE_W]){
+        // --- Tiga pita lajur V3 (rotasi siklik):
+        //   A -> B  datar, B -> C datar, C -> A NAIK lewat jembatan
+        //   (pita jembatan di-mirror vs V2: -0,115 -> +0,115).
+        const LAN_PATHS = [
+          { e:  LANE_W, x: 0,       over: false },  // A -> B (datar)
+          { e:  0,      x: -LANE_W, over: false },  // B -> C (datar)
+          { e: -LANE_W, x: LANE_W,  over: true  }   // C -> A (jembatan)
+        ];
+        for (const path of LAN_PATHS){
           const b = stripBuilder(accTop);
           for (let j = 0; j <= n; j++){
             const t = j / n;
             const s = LAN.s0 + LAN_LEN * t;
             const fr = frameAtS(s), p = fr.p;
-            const o = a * Math.cos(Math.PI * t);
-            const yT = p.y + TOP_Y + (a > 0 ? archH(t) : (a < 0 ? 0.0008 : 0));
+            const f = (1 - Math.cos(Math.PI * t)) / 2;
+            const o = path.e * (1 - f) + path.x * f;
+            const yT = p.y + TOP_Y + (path.over ? archH(t) : 0);
             b.add([
               [p.x + fr.nx * (o + rhw), yT, p.z + fr.nz * (o + rhw)],
               [p.x + fr.nx * (o - rhw), yT, p.z + fr.nz * (o - rhw)]
@@ -1827,7 +1849,7 @@ THREE.OrbitControls = OrbitControls;
           const t = j / n;
           const s = LAN.s0 + LAN_LEN * t;
           const fr = frameAtS(s), p = fr.p;
-          const o = LANE_W * Math.cos(Math.PI * t);
+          const o = -LANE_W * Math.cos(Math.PI * t);
           const yU = p.y + TOP_Y + archH(t) - ARCH_DECK;
           bU.add([
             [p.x + fr.nx * (o + rhw), yU, p.z + fr.nz * (o + rhw)],
@@ -1842,7 +1864,7 @@ THREE.OrbitControls = OrbitControls;
             const t = j / n;
             const s = LAN.s0 + LAN_LEN * t;
             const fr = frameAtS(s), p = fr.p;
-            const o = LANE_W * Math.cos(Math.PI * t) + sgn * rhw;
+            const o = -LANE_W * Math.cos(Math.PI * t) + sgn * rhw;
             const yT = p.y + TOP_Y + archH(t), yU = yT - ARCH_DECK;
             bE.add([
               [p.x + fr.nx * o, yT, p.z + fr.nz * o],
@@ -1858,7 +1880,7 @@ THREE.OrbitControls = OrbitControls;
             const t = j / n;
             const s = LAN.s0 + LAN_LEN * t;
             const fr = frameAtS(s), p = fr.p;
-            const o = LANE_W * Math.cos(Math.PI * t) + sgn * (rhw - 0.002);
+            const o = -LANE_W * Math.cos(Math.PI * t) + sgn * (rhw - 0.002);
             const yT = p.y + TOP_Y + archH(t), yW = yT + WALL_H;
             bW.add([[p.x + fr.nx * o, yT, p.z + fr.nz * o],[p.x + fr.nx * o, yW, p.z + fr.nz * o]]);
             bC.add([[p.x + fr.nx * (o - 0.002), yW, p.z + fr.nz * (o - 0.002)],[p.x + fr.nx * (o + 0.002), yW, p.z + fr.nz * (o + 0.002)]]);
@@ -1884,12 +1906,13 @@ THREE.OrbitControls = OrbitControls;
           bW.flush(); bC.flush();
         }
         // --- Tiang penyangga arch (2 kaki kotak gaya 69579) ---
-        // Di t=0,35 (sisi +) dan t=0,65 (sisi -), di bawah tepi luar pita
-        // arch — berdiri di tanah terbuka (bukan di atas lajur bawah),
-        // dari alas keping sampai underside arch. Tengah keping (t=0,5)
-        // sengaja tanpa tiang supaya lajur tengah bebas lewat di bawah arch.
+        // Di t=0,35 (sisi -) dan t=0,65 (sisi +), di bawah tepi luar pita
+        // arch (mengikuti jembatan V3 yang di-mirror) — berdiri di tanah
+        // terbuka (bukan di atas lajur bawah), dari alas keping sampai
+        // underside arch. Tengah keping (t=0,5) sengaja tanpa tiang supaya
+        // lajur tengah bebas lewat di bawah arch.
         const matLeg = new THREE.MeshStandardMaterial({ color: 0x565b63, roughness: 0.9 });
-        for (const [tt, off] of [[0.35, 0.095], [0.65, -0.095]]){
+        for (const [tt, off] of [[0.35, -0.095], [0.65, 0.095]]){
           const s = LAN.s0 + LAN_LEN * tt;
           const fr = frameAtS(s), p = fr.p;
           const h = TOP_Y + archH(tt) - ARCH_DECK;
