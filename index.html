@@ -1552,15 +1552,24 @@ THREE.OrbitControls = OrbitControls;
       const LAN_LEN = LAN.s1 - LAN.s0;                       // 1,62 m
       /* Lan1 = JEMBATAN MELENGKUNG (arched bridge) 1 lajur — koreksi dari
          foto asli Ido 27 Nov 03:36 (part fisik 69579), menggantikan model
-         X datar R5. SATU lajur luar naik lewat arch (profil cosine penuh
-         sepanjang keping, puncak di tengah), lajur luar satunya + lajur
-         tengah tetap di permukaan tanah dan lewat DI BAWAH arch. */
+         X datar R5. SATU lajur luar naik lewat arch, lajur luar satunya +
+         lajur tengah tetap di permukaan tanah dan lewat DI BAWAH arch.
+         KOREKSI V2 (27 Nov, foto set produk 69579): lajur bergeser
+         menyamping dulu di tanah — S-approach / S-exit DATAR di kedua
+         ujung keping (masing-masing ~27 cm) — arch HANYA di tengah. */
       const ARCH_H = 0.120;   // puncak arch 120 mm di atas permukaan lajur bawah [ESTIMASI dari foto: ~100-150 mm]
       const ARCH_DECK = 0.02; // tebal dek arch 20 mm -> clearance di bawah arch = 120 - 20 = 100 mm (>= 85 mm keputusan Ido; mobil <=70 mm muat, sisa 30 mm)
-      /* Profil arch: cosine penuh — 0 di kedua ujung, puncak di tengah,
-         kemiringan nol di ujung & puncak (naik/turun halus, bukan step).
-         Kemiringan maks = ARCH_H * PI / 1,62 = 13,1 deg. */
-      function archH(t){ return ARCH_H * (1 - Math.cos(2 * Math.PI * t)) / 2; }
+      const ARCH_T0 = 1 / 6, ARCH_T1 = 5 / 6; // rentang arch: tengah 2/3 keping (1,08 m); ujung 1/6 (~27 cm) datar
+      /* Profil arch V2: DATAR 0 di t < 1/6 dan t > 5/6 (S-approach/S-exit
+         datar); cosine HANYA di t in [1/6, 5/6] — 0 di kedua ujung bentang,
+         puncak di tengah bentang, kemiringan nol di ujung bentang & puncak
+         (sambungan halus, tanpa tekukan). Bentang arch 1,08 m.
+         Kemiringan maks = ARCH_H * PI / 1,08 = 19,2 deg. */
+      function archH(t){
+        if (t <= ARCH_T0 || t >= ARCH_T1) return 0;
+        const u = (t - ARCH_T0) / (ARCH_T1 - ARCH_T0);
+        return ARCH_H * (1 - Math.cos(2 * Math.PI * u)) / 2;
+      }
 
       /* Bri2: anak tangga kecil ±0,035 m di satu ujung keping (lihat sprite). */
       function stepBump(s){
@@ -1779,16 +1788,18 @@ THREE.OrbitControls = OrbitControls;
 
       /* ---------- Lan1: JEMBATAN MELENGKUNG (arched bridge, 1 lajur) ----------
          Koreksi dari foto asli Ido 27 Nov 03:36 (part fisik Tamiya 69579):
-         SATU lajur luar naik lewat arch (profil cosine penuh, puncak
-         120 mm di tengah keping [ESTIMASI foto]), menyapu menyamping
-         membentuk kurva-S, lalu turun di sisi berlawanan; lajur luar
-         satunya + lajur tengah tetap di permukaan tanah dan lewat DI
-         BAWAH arch (clearance 100 mm). Arch punya dinding sendiri di
-         kedua sisinya yang mengikuti lengkung; dinding pemisah lajur
-         bawah terputus di zona arch melintas di atasnya (t 0,25-0,75);
-         2 tiang penyangga kotak gaya 69579 di t=0,35/0,65 (tengah keping
-         sengaja tanpa tiang supaya lajur tengah bebas). Tampak atas tetap
-         X (lajur luar bertukar sisi). TANPA cover, TANPA penyempitan. */
+         SATU lajur luar naik lewat arch (puncak 120 mm di tengah bentang
+         [ESTIMASI foto]), menyapu menyamping membentuk kurva-S, lalu
+         turun di sisi berlawanan; lajur luar satunya + lajur tengah tetap
+         di permukaan tanah dan lewat DI BAWAH arch (clearance 100 mm).
+         KOREKSI V2: arch HANYA di tengah keping (t 1/6-5/6, bentang
+         1,08 m) — kedua ujung keping DATAR (S-approach/S-exit ~27 cm).
+         Arch punya dinding sendiri di kedua sisinya yang mengikuti
+         lengkung; dinding pemisah lajur bawah terputus di rentang arch
+         (t 1/6-5/6); 2 tiang penyangga kotak gaya 69579 di t=0,35/0,65
+         (tengah keping sengaja tanpa tiang supaya lajur tengah bebas).
+         Tampak atas tetap X (lajur luar bertukar sisi). TANPA cover,
+         TANPA penyempitan. */
       function buildLan1Surface(grp){
         const n = 96, rhw = LANE_W / 2 + 0.004;
         const accTop = makeAccum(), accWall = makeAccum(), accSkirt = makeAccum();
@@ -1855,13 +1866,14 @@ THREE.OrbitControls = OrbitControls;
           bW.flush(); bC.flush();
         }
         // --- Dinding pemisah diagonal (lajur bawah, di permukaan tanah):
-        // terputus di zona arch melintas di atasnya (t 0,25-0,75 — di zona
-        // itu puncak dinding 50 mm sudah tersembunyi di dalam dek arch). ---
+        // terputus di rentang arch (t 1/6-5/6) — di zona itu lajur bawah
+        // lewat di bawah dek arch tanpa pemisah (sesuai part asli 69579);
+        // pemisah HANYA ada di zona S-approach/S-exit datar. ---
         for (const sgn of [1, -1]){
           const bW = stripBuilder(accWall), bC = stripBuilder(accWall);
           for (let j = 0; j <= n; j++){
             const t = j / n;
-            if (t > 0.25 && t < 0.75){ bW.flush(); bC.flush(); continue; }
+            if (t > ARCH_T0 && t < ARCH_T1){ bW.flush(); bC.flush(); continue; }
             const s = LAN.s0 + LAN_LEN * t;
             const fr = frameAtS(s), p = fr.p;
             const o = sgn * (LANE_W / 2) * Math.cos(Math.PI * t);
